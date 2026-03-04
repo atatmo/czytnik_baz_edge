@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>QuizApp DevStudio - Mobile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; height: 100vh; overflow: hidden; padding-top: env(safe-area-inset-top); }
+        .mono-font { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+        #main-layout { display: grid; grid-template-columns: 1fr; height: calc(100vh - 110px - env(safe-area-inset-top)); transition: all 0.3s ease; overflow: hidden; }
+        #main-layout.split-active { grid-template-rows: 50% 50%; grid-template-columns: 1fr; }
+        @media (min-width: 768px) { #main-layout.split-active { grid-template-rows: 1fr; grid-template-columns: 1fr 1fr; } }
+
+        /* Edge-to-edge layout */
+        .scroll-area { overflow-y: auto; height: 100%; padding: 0; padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
+        
+        .q-card { transition: background-color 0.2s; width: 100%; background: white; border: none; border-bottom: 1px solid #e2e8f0; min-height: 100%; }
+        .q-card.flagged { background-color: #fffbeb; }
+
+        /* Osobne kafelki odpowiedzi */
+        .review-opt { cursor: pointer; border: 1px solid #e2e8f0; border-radius: 0.75rem; margin-bottom: 0.5rem; transition: all 0.2s; }
+        .review-opt:hover { background-color: #f8fafc; border-color: #cbd5e1; }
+        .review-opt.correct { background-color: #ecfdf5 !important; border-color: #10b981 !important; color: #065f46; }
+        .review-opt.incorrect { background-color: #fef2f2 !important; border-color: #ef4444 !important; color: #991b1b; }
+
+        #search-overlay { position: absolute; top: calc(110px + env(safe-area-inset-top)); left: 0; right: 0; bottom: 0; background: white; z-index: 100; display: none; flex-direction: column; border-top: 1px solid #e2e8f0; }
+        #search-results { overflow-y: auto; flex-grow: 1; padding-bottom: env(safe-area-inset-bottom); }
+
+        .filter-chip { font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 6px; border: 1px solid #e2e8f0; cursor: pointer; transition: all 0.2s; user-select: none; white-space: nowrap; }
+        .filter-chip.active { background-color: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+        .filter-chip.inactive { background-color: white; color: #94a3b8; border-color: #e2e8f0; }
+        .filter-chip.flag-filter.active { background-color: #fffbeb; color: #d97706; border-color: #fcd34d; }
+
+        input.edit-input, textarea.edit-input { background: transparent; border: 1px dashed #cbd5e1; padding: 8px; border-radius: 6px; width: 100%; transition: all 0.2s; font-size: 16px !important; }
+        input.edit-input:focus, textarea.edit-input:focus { background: white; border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+
+        .glass-header { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid #e2e8f0; }
+        
+        #notes-panel { box-shadow: 10px 0 20px rgba(0,0,0,0.05); width: 85vw; max-width: 320px; }
+        #exit-modal { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); }
+        #nav-input::-webkit-outer-spin-button, #nav-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        #nav-input { -moz-appearance: textfield; font-size: 16px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        #bottom-nav { bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+    </style>
+</head>
+<body class="text-slate-900">
+
+    <nav class="glass-header flex flex-col px-4 py-2 sticky top-0 z-50">
+        <div class="flex items-center justify-between w-full mb-2">
+            <div class="flex items-center gap-3">
+                <button onclick="toggleNotes()" class="p-2 -ml-2 hover:bg-slate-100 rounded-lg text-slate-500 transition" title="Otwórz notatki"><i data-lucide="notebook-pen" class="w-5 h-5"></i></button>
+                <div class="bg-slate-900 p-1.5 rounded-lg"><i data-lucide="code-2" class="text-white w-4 h-4"></i></div>
+                <div>
+                    <h1 class="font-bold text-base leading-tight">DevStudio</h1>
+                    <p class="text-[9px] text-slate-500 font-medium uppercase tracking-wider line-clamp-1 w-32" id="file-name-display">Brak pliku</p>
+                </div>
+            </div>
+            <div class="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
+                <button onclick="setMode('review')" id="mode-review-btn" class="px-2 py-1.5 rounded-md text-[11px] font-bold transition flex items-center gap-1 bg-white text-blue-600 shadow-sm"><i data-lucide="eye" class="w-3 h-3"></i> Test</button>
+                <button onclick="setMode('edit')" id="mode-edit-btn" class="px-2 py-1.5 rounded-md text-[11px] font-bold text-slate-500 transition flex items-center gap-1 hover:bg-white/50"><i data-lucide="edit-3" class="w-3 h-3"></i> Edycja</button>
+            </div>
+        </div>
+
+        <div id="action-bar" class="hidden flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 w-full snap-x">
+            <button onclick="addNewQuestion()" id="btn-add-new" class="hidden flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold transition shadow-sm border border-blue-100 snap-start"><i data-lucide="plus" class="w-4 h-4"></i> Dodaj</button>
+            <button onclick="toggleFlagFilter()" id="btn-filter-flag" class="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition snap-start"><i data-lucide="flag" class="w-4 h-4"></i></button>
+            <button onclick="toggleShuffle()" id="btn-shuffle" class="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition border border-transparent snap-start"><i data-lucide="shuffle" class="w-4 h-4"></i></button>
+            <button onclick="toggleShowCorrect()" id="btn-show-correct" class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition snap-start"><i data-lucide="check" class="w-4 h-4"></i> Poprawne</button>
+            <div class="h-5 w-px bg-slate-200 flex-shrink-0 mx-0.5"></div>
+            <button onclick="resetAllAnswers()" class="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition snap-start"><i data-lucide="rotate-ccw" class="w-4 h-4"></i></button>
+            <button onclick="toggleSearch()" class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition snap-start"><i data-lucide="search" class="w-4 h-4"></i> Szukaj</button>
+            <button onclick="toggleExportMenu()" id="btn-export-menu" class="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition snap-start relative"><i data-lucide="download" class="w-4 h-4"></i></button>
+            <button onclick="openExitModal()" class="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition snap-start ml-auto"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+        </div>
+        
+        <div id="export-menu" class="hidden absolute right-4 top-[95px] w-64 bg-white rounded-xl shadow-2xl border border-slate-200 py-2 z-50">
+            <div class="px-4 py-2 border-b border-slate-100 flex gap-2">
+                <button onclick="setExportFormat('csv')" id="btn-fmt-csv" class="flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-blue-200 bg-blue-50 text-blue-600">CSV</button>
+                <button onclick="setExportFormat('txt')" id="btn-fmt-txt" class="flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-slate-200 bg-white text-slate-500">TXT</button>
+            </div>
+            <div class="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Zakres danych</div>
+            <button onclick="exportData('all')" class="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 text-sm font-medium flex items-center gap-2"><i data-lucide="database" class="w-4 h-4 text-slate-400"></i> Cała baza</button>
+            <button onclick="exportData('flagged')" class="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 text-sm font-medium flex items-center gap-2"><i data-lucide="flag" class="w-4 h-4 text-amber-500"></i> Oflagowane</button>
+            <button onclick="exportData('incorrect')" class="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 text-sm font-medium flex items-center gap-2"><i data-lucide="x-circle" class="w-4 h-4 text-red-500"></i> Błędne</button>
+            <button onclick="exportData('search')" class="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 text-sm font-medium flex items-center gap-2"><i data-lucide="search" class="w-4 h-4 text-blue-500"></i> Wyniki wyszukiwania</button>
+        </div>
+    </nav>
+
+    <section id="view-upload" class="flex flex-col items-center justify-start h-[calc(100vh-110px)] p-6 overflow-y-auto">
+        <div class="text-center w-full bg-white p-6 rounded-3xl shadow-lg border border-slate-200 mt-4">
+            <div class="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-600"><i data-lucide="database" class="w-8 h-8"></i></div>
+            <h2 class="text-xl font-bold mb-2">Wczytaj Nową Bazę</h2>
+            <p class="text-slate-500 mb-6 text-xs">Wybierz plik CSV, aby rozpocząć pracę.</p>
+            <label class="block w-full cursor-pointer">
+                <input type="file" id="csv-input" accept=".csv" class="hidden" />
+                <div class="w-full py-3 bg-slate-900 text-white rounded-xl font-bold active:bg-blue-600 flex items-center justify-center gap-2 shadow-lg"><i data-lucide="upload" class="w-4 h-4"></i> Wybierz plik CSV</div>
+            </label>
+        </div>
+
+        <div id="recent-files-container" class="mt-8 hidden w-full text-left max-w-md">
+            <h3 class="text-xs font-bold text-slate-400 uppercase mb-3 px-2 flex items-center gap-2"><i data-lucide="history" class="w-3 h-3"></i> Ostatnie sesje</h3>
+            <div id="recent-files-list" class="space-y-2"></div>
+        </div>
+    </section>
+
+    <main id="main-layout" class="hidden bg-white">
+        <div id="main-panel" class="scroll-area relative border-r border-slate-200 min-h-0 bg-white">
+            <div id="question-container" class="w-full"></div>
+        </div>
+        <div id="compare-panel" class="bg-white hidden flex-col border-t md:border-t-0 md:border-l border-slate-300 relative z-20 min-h-0">
+            <div class="flex-none px-4 py-2 border-b border-slate-200 bg-slate-50 flex justify-between items-center shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase text-blue-600 flex items-center gap-1"><i data-lucide="split" class="w-3 h-3"></i> Porównanie</span>
+                    <div id="search-nav-controls" class="hidden flex items-center bg-white rounded border border-slate-200 shadow-sm ml-1">
+                         <button onclick="prevSearchResult()" id="btn-search-prev" class="px-2 py-1 text-slate-500 active:bg-slate-100 disabled:opacity-30"><i data-lucide="chevron-left" class="w-3 h-3"></i></button>
+                         <span id="search-counter" class="text-[9px] font-mono text-slate-400 px-1 font-bold text-center min-w-[30px]">--/--</span>
+                         <button onclick="nextSearchResult()" id="btn-search-next" class="px-2 py-1 text-slate-500 active:bg-slate-100 disabled:opacity-30"><i data-lucide="chevron-right" class="w-3 h-3"></i></button>
+                    </div>
+                </div>
+                <button onclick="closeSplitView()" class="p-1.5 active:bg-slate-200 text-slate-400 rounded-lg"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="flex-grow overflow-y-auto p-4 pb-20 scroll-area">
+                <div id="compare-container" class="space-y-4"></div>
+            </div>
+        </div>
+    </main>
+
+    <div id="notes-panel" class="fixed top-0 left-0 h-full bg-white z-[60] transform -translate-x-full transition-transform duration-300 border-r border-slate-200 flex flex-col pt-[env(safe-area-inset-top)]">
+        <div class="p-4 h-14 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <h3 class="font-bold text-slate-700 flex items-center gap-2 text-sm"><i data-lucide="notebook-pen" class="w-4 h-4 text-blue-600"></i> Brudnopis</h3>
+            <div class="flex gap-1">
+                <button onclick="downloadNotes()" class="p-2 active:bg-slate-200 rounded text-slate-400"><i data-lucide="save" class="w-4 h-4"></i></button>
+                <button onclick="toggleNotes()" class="p-2 active:bg-slate-200 rounded text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+        </div>
+        <div class="flex-grow p-4 bg-yellow-50/30 pb-[env(safe-area-inset-bottom)]">
+            <textarea id="global-notes" oninput="markUnsaved()" class="w-full h-full resize-none outline-none text-base text-slate-700 bg-transparent placeholder-slate-400 font-medium" placeholder="Twoje notatki..."></textarea>
+        </div>
+    </div>
+
+    <datalist id="category-suggestions"></datalist>
+
+    <div id="exit-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl border border-slate-200">
+            <div class="w-14 h-14 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="log-out" class="w-6 h-6"></i></div>
+            <h3 class="text-lg font-bold mb-1 text-slate-900">Zarządzanie Sesją</h3>
+            <p class="text-slate-500 mb-6 text-xs">Twój postęp jest na bieżąco zapisywany w telefonie.</p>
+            <div class="space-y-2">
+                <button onclick="safeExit('menu')" class="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2"><i data-lucide="home" class="w-4 h-4"></i> Wróć do menu głównego</button>
+                <button onclick="safeExit('export')" class="w-full py-3 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl font-bold text-sm flex items-center justify-center gap-2"><i data-lucide="download" class="w-4 h-4"></i> Pobierz jako CSV i wyjdź</button>
+                <button onclick="closeExitModal()" class="w-full py-2 text-slate-400 font-bold text-xs mt-2">Anuluj</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="bottom-nav" class="fixed left-1/2 transform -translate-x-1/2 bg-slate-900/95 backdrop-blur text-white px-2 py-1.5 rounded-2xl shadow-2xl z-40 hidden flex items-center gap-1 border border-slate-700">
+        <button id="btn-first" class="p-2 active:bg-white/20 rounded-xl disabled:opacity-30"><i data-lucide="chevrons-left" class="w-5 h-5"></i></button>
+        <button id="btn-prev" class="p-2 active:bg-white/20 rounded-xl disabled:opacity-30"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+        <div class="flex items-center gap-1 mx-1 bg-slate-800/80 rounded-lg px-2 py-1 border border-slate-700">
+            <input type="number" id="nav-input" class="bg-transparent text-white font-mono font-bold text-center w-10 outline-none rounded" value="1">
+            <span class="text-slate-400 font-mono text-xs font-bold">/<span id="nav-total">--</span></span>
+        </div>
+        <button id="btn-next" class="p-2 active:bg-white/20 rounded-xl disabled:opacity-30"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+        <button id="btn-last" class="p-2 active:bg-white/20 rounded-xl disabled:opacity-30"><i data-lucide="chevrons-right" class="w-5 h-5"></i></button>
+    </div>
+
+    <div id="search-overlay">
+        <div class="p-3 border-b border-slate-100 flex gap-2 items-center bg-white">
+            <i data-lucide="search" class="text-slate-400 w-5 h-5"></i>
+            <input type="text" id="search-input" placeholder="Wpisz frazę..." class="w-full bg-transparent outline-none text-slate-800 font-medium py-2 text-base">
+            <button onclick="toggleSearch()" class="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-2 rounded-lg">Zamknij</button>
+        </div>
+        <div class="px-3 py-2 bg-slate-50 border-b border-slate-100 flex flex-wrap gap-1.5" id="search-filters-container">
+            <button onclick="toggleSearchFilter('question')" id="sf-question" class="filter-chip active">Pytanie</button>
+            <button onclick="toggleSearchFilter('options')" id="sf-options" class="filter-chip active">Odp</button>
+            <button onclick="toggleSearchFilter('explanation')" id="sf-explanation" class="filter-chip active">Wyjaśnienie</button>
+            <button onclick="toggleSearchFilter('category')" id="sf-category" class="filter-chip active">Kategoria</button>
+            <button onclick="toggleSearchFilter('flagged')" id="sf-flagged" class="filter-chip inactive flag-filter flex items-center gap-1"><i data-lucide="flag" class="w-3 h-3"></i> Oflagowane</button>
+        </div>
+        <div id="search-results" class="p-2 space-y-1"></div>
+    </div>
+
+    <script>
+        const STORAGE_PREFIX = 'QuizApp_Save_';
+        const RECENT_FILES_KEY = 'QuizApp_RecentFiles';
+
+        const state = { currentFileName: '', questions: [], currentIndex: 0, searchQuery: '', isSplitView: false, splitTargetIndex: null, mode: 'review', filter: 'all', showOnlyCorrect: false, shuffleAnswers: false, exportFormat: 'csv', searchResults: [], searchResultIndex: -1, searchFilters: { question: true, options: true, explanation: true, category: true, flagged: false } };
+
+        const els = {
+            uploadView: document.getElementById('view-upload'), mainLayout: document.getElementById('main-layout'), mainPanel: document.getElementById('main-panel'), comparePanel: document.getElementById('compare-panel'), mainContainer: document.getElementById('question-container'), compareContainer: document.getElementById('compare-container'), bottomNav: document.getElementById('bottom-nav'), actionBar: document.getElementById('action-bar'), searchInput: document.getElementById('search-input'), searchOverlay: document.getElementById('search-overlay'), searchResults: document.getElementById('search-results'), csvInput: document.getElementById('csv-input'), navInput: document.getElementById('nav-input'), navTotal: document.getElementById('nav-total'), btnFirst: document.getElementById('btn-first'), btnLast: document.getElementById('btn-last'), btnPrev: document.getElementById('btn-prev'), btnNext: document.getElementById('btn-next'), fileName: document.getElementById('file-name-display'), modeReviewBtn: document.getElementById('mode-review-btn'), modeEditBtn: document.getElementById('mode-edit-btn'), btnAdd: document.getElementById('btn-add-new'), btnFilterFlag: document.getElementById('btn-filter-flag'), btnShowCorrect: document.getElementById('btn-show-correct'), btnShuffle: document.getElementById('btn-shuffle'), searchNavControls: document.getElementById('search-nav-controls'), searchCounter: document.getElementById('search-counter'), btnSearchPrev: document.getElementById('btn-search-prev'), btnSearchNext: document.getElementById('btn-search-next'), exportMenu: document.getElementById('export-menu'), btnFmtCsv: document.getElementById('btn-fmt-csv'), btnFmtTxt: document.getElementById('btn-fmt-txt'), notesPanel: document.getElementById('notes-panel'), globalNotes: document.getElementById('global-notes'), exitModal: document.getElementById('exit-modal')
+        };
+
+        lucide.createIcons();
+        updateModeUI();
+
+        // --- Zapis (localStorage) ---
+        function updateRecentFiles(fileName) {
+            if (!fileName) return;
+            let recent = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || '[]');
+            recent = recent.filter(f => f !== fileName);
+            recent.unshift(fileName);
+            if (recent.length > 5) recent.pop();
+            localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(recent));
+        }
+
+        window.saveProgress = () => {
+            if (!state.currentFileName) return;
+            const dataToSave = { questions: state.questions, notes: els.globalNotes ? els.globalNotes.value : '' };
+            localStorage.setItem(STORAGE_PREFIX + state.currentFileName, JSON.stringify(dataToSave));
+            updateRecentFiles(state.currentFileName);
+        };
+
+        window.markUnsaved = () => { saveProgress(); };
+
+        window.loadSavedSession = (fileName) => {
+            const savedData = localStorage.getItem(STORAGE_PREFIX + fileName);
+            if (savedData) {
+                try {
+                    const parsed = JSON.parse(savedData);
+                    state.currentFileName = fileName;
+                    state.questions = parsed.questions;
+                    if (els.globalNotes && parsed.notes) els.globalNotes.value = parsed.notes;
+                    
+                    els.fileName.textContent = fileName;
+                    els.uploadView.classList.add('hidden'); 
+                    els.mainLayout.classList.remove('hidden');
+                    els.bottomNav.classList.remove('hidden'); 
+                    els.actionBar.classList.remove('hidden');
+                    renderMainView();
+                    updateRecentFiles(fileName);
+                } catch(e) { console.error(e); }
+            }
+        };
+
+        window.deleteSession = (fileName, event) => {
+            event.stopPropagation();
+            if(confirm(`Usunąć cały zapisany postęp dla bazy: ${fileName}?`)) {
+                localStorage.removeItem(STORAGE_PREFIX + fileName);
+                let recent = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || '[]');
+                recent = recent.filter(f => f !== fileName);
+                localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(recent));
+                renderRecentFiles();
+            }
+        };
+
+        function renderRecentFiles() {
+            const recent = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || '[]');
+            const container = document.getElementById('recent-files-container');
+            const list = document.getElementById('recent-files-list');
+            if(recent.length > 0) {
+                container.classList.remove('hidden');
+                list.innerHTML = recent.map(f => `
+                    <div class="flex items-center justify-between bg-white border border-slate-200 p-3.5 rounded-xl active:bg-slate-50 transition shadow-sm cursor-pointer" onclick="loadSavedSession('${f}')">
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <div class="w-8 h-8 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center flex-shrink-0"><i data-lucide="book-open" class="w-4 h-4"></i></div>
+                            <div class="flex flex-col"><span class="text-sm font-bold text-slate-700 truncate">${f}</span><span class="text-[10px] text-slate-400">Zapisana sesja</span></div>
+                        </div>
+                        <button onclick="deleteSession('${f}', event)" class="p-2 -mr-2 text-slate-300 active:text-red-500 rounded-lg"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            } else { container.classList.add('hidden'); }
+        }
+
+        window.addEventListener('DOMContentLoaded', renderRecentFiles);
+
+        // --- Inicjalizacja pliku ---
+        els.csvInput.addEventListener('change', (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            const fileName = file.name.replace(/\.csv$/i, '');
+            
+            if (localStorage.getItem(STORAGE_PREFIX + fileName)) {
+                if(confirm("Znaleziono stary zapis dla tego pliku. Czy chcesz go kontynuować?\n\nOK = Kontynuuj stary zapis\nAnuluj = Skasuj stary zapis i wczytaj czysty plik")) {
+                    loadSavedSession(fileName);
+                    e.target.value = ''; return;
+                }
+            }
+            
+            state.currentFileName = fileName;
+            els.fileName.textContent = file.name;
+            Papa.parse(file, {
+                header: true, skipEmptyLines: true,
+                complete: (results) => initApp(results.data),
+                error: (err) => alert("Błąd CSV: " + err)
+            });
+            e.target.value = '';
+        });
+
+        function initApp(data) {
+            state.questions = data.map((row, i) => ({
+                id: `q-${Date.now()}-${i}`, _raw: row, question: row['Pytanie'] || row['pytanie'] || '', category: row['Kategoria'] || row['kategoria'] || 'Ogólne',
+                options: [ { key: 'A', text: row['Wariant A'] || row['A'] || '' }, { key: 'B', text: row['Wariant B'] || row['B'] || '' }, { key: 'C', text: row['Wariant C'] || row['C'] || '' }, { key: 'D', text: row['Wariant D'] || row['D'] || '' }, { key: 'E', text: row['Wariant E'] || row['E'] || '' } ],
+                correct: (row['Poprawna'] || row['Poprawna Odpowiedź'] || row['Odpowiedź'] || '').trim(), explanation: row['Wyjaśnienie'] || row['wyjaśnienie'] || '', flagged: (row['Oflagowane'] || '') === '1', _tempAnswer: null 
+            })).filter(q => q.question);
+
+            els.uploadView.classList.add('hidden'); els.mainLayout.classList.remove('hidden');
+            els.bottomNav.classList.remove('hidden'); els.actionBar.classList.remove('hidden');
+            saveProgress(); renderMainView();
+        }
+
+        function getRenderList() { return state.filter === 'flagged' ? state.questions.filter(q => q.flagged) : state.questions; }
+
+        window.setMode = (mode) => { state.mode = mode; updateModeUI(); renderMainView(); if (state.isSplitView) renderCompareView(state.splitTargetIndex); };
+        window.toggleFlagFilter = () => { state.filter = state.filter === 'all' ? 'flagged' : 'all'; state.currentIndex = 0; els.btnFilterFlag.classList.toggle('text-amber-600', state.filter === 'flagged'); els.btnFilterFlag.classList.toggle('bg-amber-50', state.filter === 'flagged'); renderMainView(); };
+        window.toggleShowCorrect = () => { state.showOnlyCorrect = !state.showOnlyCorrect; els.btnShowCorrect.classList.toggle('bg-green-100', state.showOnlyCorrect); els.btnShowCorrect.classList.toggle('text-green-700', state.showOnlyCorrect); renderMainView(); if (state.isSplitView) renderCompareView(state.splitTargetIndex); };
+        window.toggleShuffle = () => { state.shuffleAnswers = !state.shuffleAnswers; if (state.shuffleAnswers) state.questions.forEach(q => q._shuffleOrder = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5)); els.btnShuffle.classList.toggle('bg-indigo-100', state.shuffleAnswers); els.btnShuffle.classList.toggle('text-indigo-700', state.shuffleAnswers); renderMainView(); if (state.isSplitView) renderCompareView(state.splitTargetIndex); };
+        window.resetAllAnswers = () => { if (confirm("Resetować wszystko?")) { state.questions.forEach(q => q._tempAnswer = null); state.showOnlyCorrect = false; els.btnShowCorrect.classList.remove('bg-green-100', 'text-green-700'); saveProgress(); renderMainView(); if (state.isSplitView) renderCompareView(state.splitTargetIndex); setTimeout(() => lucide.createIcons(), 50); } };
+        window.resetQuestionAnswer = (id) => { const q = state.questions.find(item => item.id === id); if (q) { q._tempAnswer = null; saveProgress(); renderMainView(); if (state.isSplitView && state.questions[state.splitTargetIndex].id === id) renderCompareView(state.splitTargetIndex); } };
+
+        function updateModeUI() {
+            const isEdit = state.mode === 'edit';
+            els.modeEditBtn.classList.toggle('text-blue-600', isEdit); els.modeEditBtn.classList.toggle('bg-white', isEdit); els.modeEditBtn.classList.toggle('shadow-sm', isEdit);
+            els.modeReviewBtn.classList.toggle('text-blue-600', !isEdit); els.modeReviewBtn.classList.toggle('bg-white', !isEdit); els.modeReviewBtn.classList.toggle('shadow-sm', !isEdit);
+            els.btnAdd.classList.toggle('hidden', !isEdit); els.btnShuffle.classList.toggle('hidden', isEdit);
+        }
+
+        window.toggleNotes = () => els.notesPanel.classList.toggle('-translate-x-full');
+        window.downloadNotes = () => { const content = els.globalNotes.value; if (!content.trim()) return; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); a.download = `notatki_${state.currentFileName}.txt`; document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+        window.openExitModal = () => els.exitModal.classList.remove('hidden');
+        window.closeExitModal = () => els.exitModal.classList.add('hidden');
+        window.safeExit = (action) => { if (action === 'export') { exportData('all'); } window.location.reload(); };
+
+        function renderMainView() {
+            const list = getRenderList(); updateCategorySuggestions();
+            if (list.length === 0) { els.mainContainer.innerHTML = '<div class="text-center p-10 text-slate-400">Brak wyników.</div>'; els.navInput.value = 0; els.navTotal.textContent = 0; [els.btnPrev, els.btnNext, els.btnFirst, els.btnLast, els.navInput].forEach(b => b.disabled = true); return; }
+            if (state.currentIndex >= list.length) state.currentIndex = 0;
+            const q = list[state.currentIndex]; els.mainContainer.innerHTML = createCardHTML(q, state.questions.findIndex(item => item.id === q.id));
+            if (state.mode === 'edit') els.mainContainer.querySelectorAll('textarea').forEach(autoResize);
+            els.navInput.value = state.currentIndex + 1; els.navTotal.textContent = list.length; els.navInput.disabled = false; els.btnFirst.disabled = els.btnPrev.disabled = state.currentIndex === 0; els.btnNext.disabled = els.btnLast.disabled = state.currentIndex === list.length - 1; lucide.createIcons();
+        }
+
+        function renderCompareView(targetIndex) {
+            state.splitTargetIndex = targetIndex; els.compareContainer.innerHTML = createCardHTML(state.questions[targetIndex], targetIndex);
+            if (state.mode === 'edit') els.compareContainer.querySelectorAll('textarea').forEach(autoResize);
+            if (state.searchResults.length > 0) { els.searchNavControls.classList.remove('hidden'); const sIdx = state.searchResults.findIndex(res => res.index === targetIndex); if (sIdx !== -1) state.searchResultIndex = sIdx; els.searchCounter.textContent = `${state.searchResultIndex + 1}/${state.searchResults.length}`; els.btnSearchPrev.disabled = state.searchResultIndex <= 0; els.btnSearchNext.disabled = state.searchResultIndex >= state.searchResults.length - 1; } else els.searchNavControls.classList.add('hidden'); lucide.createIcons();
+        }
+
+        function createCardHTML(q, index) {
+            const isEdit = state.mode === 'edit';
+            
+            if (isEdit) {
+                const optionsHTML = q.options.map((opt, i) => {
+                    const isCorrect = opt.text.trim() === q.correct.trim() && opt.text !== '';
+                    if (state.showOnlyCorrect && !isCorrect) return '';
+                    return `<div class="flex items-start gap-3 mb-3"><div class="mt-2 w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">${opt.key}</div><div class="flex-grow"><textarea oninput="autoResize(this); updateField('${q.id}', 'opt-${i}', this.value)" class="edit-input w-full resize-none overflow-hidden min-h-[44px] ${isCorrect ? 'bg-green-50 border-green-500' : 'bg-white'}" rows="1">${opt.text}</textarea></div><button onclick="setCorrect('${q.id}', '${opt.key}')" class="mt-1.5 p-2 active:bg-slate-100 rounded-full"><i data-lucide="check-circle" class="w-6 h-6 ${isCorrect ? 'text-green-600' : 'text-slate-300'}"></i></button></div>`;
+                }).join('');
+                
+                return `<div class="q-card pb-10 ${q.flagged ? 'flagged' : ''}">
+                    <div class="flex justify-between items-start px-5 pt-4 pb-3 border-b border-slate-100 bg-slate-50/50">
+                        <div class="flex items-center gap-2"><span class="bg-slate-200 text-slate-600 px-2 py-1 rounded text-[10px] font-mono font-bold">#${index + 1}</span><input type="text" value="${q.category}" list="category-suggestions" oninput="updateField('${q.id}', 'cat', this.value)" class="edit-input text-xs font-bold uppercase text-blue-600 w-24 px-1 py-0 border-none bg-transparent" placeholder="KAT"></div>
+                        <div class="flex items-center gap-1"><button onclick="toggleFlag('${q.id}')" class="p-2 rounded-lg active:bg-slate-200 ${q.flagged ? 'text-amber-500' : 'text-slate-400'}"><i data-lucide="flag" class="w-5 h-5 fill-current"></i></button><button onclick="deleteQuestion('${q.id}')" class="p-2 rounded-lg text-slate-400 active:text-red-500"><i data-lucide="trash-2" class="w-5 h-5"></i></button><button onclick="duplicateQuestion('${q.id}')" class="p-2 rounded-lg text-slate-400 active:text-blue-500"><i data-lucide="copy" class="w-5 h-5"></i></button></div>
+                    </div>
+                    <div class="px-5 py-4"><textarea oninput="autoResize(this); updateField('${q.id}', 'question', this.value)" class="edit-input text-[17px] font-medium text-slate-900 leading-relaxed w-full resize-none overflow-hidden min-h-[80px] border-transparent px-0" rows="2" placeholder="Treść pytania...">${q.question}</textarea></div>
+                    <div class="px-5 pb-2">${optionsHTML}</div>
+                    <div class="px-5 mt-2"><div class="bg-indigo-50/50 rounded-xl p-4 border border-indigo-100/50"><textarea oninput="autoResize(this); updateField('${q.id}', 'explanation', this.value)" class="edit-input text-sm text-slate-600 w-full resize-none bg-transparent border-transparent px-0 overflow-hidden min-h-[50px]" rows="2" placeholder="Wyjaśnienie...">${q.explanation}</textarea></div></div>
+                </div>`;
+            } else {
+                const hasAnswered = q._tempAnswer !== null; let displayOptions = q.options;
+                if (state.shuffleAnswers && q._shuffleOrder) displayOptions = q.options.map((opt, idx) => ({ key: opt.key, text: q.options[q._shuffleOrder[idx]].text }));
+                
+                const optionsHTML = displayOptions.map(opt => {
+                    if (!opt.text) return ''; const isCorrect = opt.text.trim() === q.correct.trim(); if (state.showOnlyCorrect && !isCorrect) return '';
+                    let className = "review-opt bg-white p-4 text-[15px] font-medium text-slate-700 flex items-start gap-4 shadow-sm"; 
+                    let icon = `<span class="w-6 h-6 flex items-center justify-center bg-slate-100 rounded text-[11px] font-bold text-slate-500 mt-0.5">${opt.key}</span>`;
+                    
+                    if (state.showOnlyCorrect && isCorrect) { className += " correct font-bold shadow-none"; icon = `<i data-lucide="check-circle" class="w-6 h-6 text-green-600 mt-0.5"></i>`; }
+                    else if (hasAnswered) { 
+                        const isSelected = q._tempAnswer === opt.text; 
+                        if (isCorrect) { className += " correct font-bold shadow-none"; icon = `<i data-lucide="check-circle" class="w-6 h-6 text-green-600 mt-0.5"></i>`; } 
+                        else if (isSelected && !isCorrect) { className += " incorrect shadow-none"; icon = `<i data-lucide="x-circle" class="w-6 h-6 text-red-600 mt-0.5"></i>`; } 
+                        else className += " opacity-50 bg-slate-50 shadow-none"; 
+                    }
+                    return `<div class="${className}" onclick="handleReviewAnswer('${q.id}', '${opt.text.replace(/'/g, "\\'")}')"><div class="flex-shrink-0">${icon}</div><div class="leading-relaxed pt-0.5">${formatText(opt.text)}</div></div>`;
+                }).join('');
+                
+                return `<div class="q-card pb-10 ${q.flagged ? 'flagged' : ''}">
+                    <div class="flex justify-between items-center px-5 py-3 border-b border-slate-100 bg-slate-50/80">
+                        <div class="flex items-center gap-3"><span class="bg-slate-200 text-slate-600 px-2 py-1 rounded text-[10px] font-mono font-bold">#${index + 1}</span><span class="text-[10px] font-bold uppercase text-blue-600 tracking-wider">${q.category}</span></div>
+                        <div class="flex items-center gap-1">${(!state.showOnlyCorrect && hasAnswered) ? `<button onclick="resetQuestionAnswer('${q.id}')" class="p-2 rounded-lg active:bg-slate-200 text-slate-400"><i data-lucide="rotate-ccw" class="w-5 h-5"></i></button>` : ''}<button onclick="toggleFlag('${q.id}')" class="p-2 rounded-lg active:bg-slate-200 ${q.flagged ? 'text-amber-500' : 'text-slate-400'}"><i data-lucide="flag" class="w-5 h-5 fill-current"></i></button></div>
+                    </div>
+                    <div class="px-5 pt-6 pb-6"><h3 class="text-[17px] font-semibold text-slate-900 leading-relaxed">${formatText(q.question)}</h3></div>
+                    <div class="px-5 select-none flex flex-col">${optionsHTML}</div>
+                    ${((hasAnswered || state.showOnlyCorrect) && q.explanation) ? `<div class="px-5 mt-4"><div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-[13px] text-slate-600 leading-relaxed"><strong class="text-[10px] uppercase text-slate-400 block mb-2 tracking-wider flex items-center gap-1"><i data-lucide="info" class="w-3 h-3"></i> Wyjaśnienie</strong>${formatText(q.explanation)}</div></div>` : ''}
+                </div>`;
+            }
+        }
+
+        window.updateCategorySuggestions = () => { const datalist = document.getElementById('category-suggestions'); if (datalist) datalist.innerHTML = [...new Set(state.questions.map(q => q.category).filter(c => c))].sort().map(c => `<option value="${c}">`).join(''); };
+        window.formatText = (text) => text ? text.replace(/\n/g, '<br>') : '';
+        window.autoResize = (el) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
+        window.updateField = (id, field, value) => { const q = state.questions.find(item => item.id === id); if (!q) return; if (field === 'cat') q.category = value; else if (field === 'question') q.question = value; else if (field === 'explanation') q.explanation = value; else if (field.startsWith('opt-')) { const idx = parseInt(field.split('-')[1]); q.options[idx].text = value; if (q.correct === q.options[idx].text) q.correct = value; } saveProgress(); };
+        window.setCorrect = (id, key) => { const q = state.questions.find(item => item.id === id); if (q) { const opt = q.options.find(o => o.key === key); if (opt) { q.correct = opt.text; saveProgress(); renderMainView(); if (state.isSplitView) renderCompareView(state.splitTargetIndex); } } };
+        window.handleReviewAnswer = (id, val) => { if (state.mode !== 'review') return; state.questions.find(item => item.id === id)._tempAnswer = val; saveProgress(); renderMainView(); if (state.isSplitView && state.questions[state.splitTargetIndex].id === id) renderCompareView(state.splitTargetIndex); };
+        window.toggleFlag = (id) => { const q = state.questions.find(item => item.id === id); if (q) { q.flagged = !q.flagged; saveProgress(); renderMainView(); if (state.isSplitView && state.questions[state.splitTargetIndex].id === id) renderCompareView(state.splitTargetIndex); } };
+        window.deleteQuestion = (id) => { if (!confirm("Usunąć?")) return; const idx = state.questions.findIndex(q => q.id === id); if (idx > -1) { if (state.isSplitView) { if (state.questions[state.splitTargetIndex].id === id) closeSplitView(); else if (idx < state.splitTargetIndex) state.splitTargetIndex--; } state.questions.splice(idx, 1); saveProgress(); renderMainView(); } };
+        window.duplicateQuestion = (id) => { const oIdx = state.questions.findIndex(q => q.id === id); if (oIdx === -1) return; const newQ = JSON.parse(JSON.stringify(state.questions[oIdx])); newQ.id = `q-${Date.now()}`; newQ.flagged = false; newQ._tempAnswer = null; if (state.shuffleAnswers) newQ._shuffleOrder = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5); state.questions.splice(oIdx + 1, 0, newQ); state.currentIndex = oIdx + 1; saveProgress(); renderMainView(); };
+        window.addNewQuestion = () => { const newQ = { id: `q-new-${Date.now()}`, question: 'Nowe...', category: 'Nowa', options: [{key:'A',text:''},{key:'B',text:''},{key:'C',text:''},{key:'D',text:''},{key:'E',text:''}], correct: '', explanation: '', flagged: false, _tempAnswer: null, _raw: {} }; let insertIndex = state.questions.length; if (getRenderList().length > 0) insertIndex = Math.max(0, state.questions.findIndex(q => q.id === getRenderList()[state.currentIndex].id) + 1); state.questions.splice(insertIndex, 0, newQ); state.currentIndex = insertIndex; saveProgress(); renderMainView(); };
+
+        window.toggleSearch = () => { const isHidden = els.searchOverlay.style.display !== 'flex'; els.searchOverlay.style.display = isHidden ? 'flex' : 'none'; if (isHidden) { els.searchInput.focus(); performSearch(); } };
+        window.toggleSearchFilter = (key) => { state.searchFilters[key] = !state.searchFilters[key]; const btn = document.getElementById(key === 'flagged' ? 'sf-flagged' : `sf-${key}`); btn.className = state.searchFilters[key] ? `filter-chip active ${key==='flagged'?'flag-filter flex items-center gap-1':''}` : `filter-chip inactive ${key==='flagged'?'flag-filter flex items-center gap-1':''}`; if (state.searchQuery.length >= 2) performSearch(); };
+        els.searchInput.addEventListener('input', (e) => { state.searchQuery = e.target.value.toLowerCase(); performSearch(); });
+
+        function performSearch() {
+            const q = state.searchQuery; els.searchResults.innerHTML = '';
+            if (q.length < 2) { els.searchResults.innerHTML = '<div class="text-xs text-slate-400 p-2">Wpisz min. 2 znaki...</div>'; state.searchResults = []; return; }
+            const matches = state.questions.map((item, index) => ({ item, index })).filter(({ item }) => {
+                if (state.searchFilters.flagged && !item.flagged) return false;
+                if (state.searchFilters.question && item.question.toLowerCase().includes(q)) return true;
+                if (state.searchFilters.explanation && item.explanation.toLowerCase().includes(q)) return true;
+                if (state.searchFilters.category && item.category.toLowerCase().includes(q)) return true;
+                if (state.searchFilters.options && item.options.some(opt => opt.text.toLowerCase().includes(q))) return true;
+                return false;
+            });
+            state.searchResults = matches;
+            if (matches.length === 0) { els.searchResults.innerHTML = '<div class="text-xs text-slate-400 p-2">Brak wyników.</div>'; return; }
+            matches.forEach(({ item, index }, matchIndex) => {
+                const el = document.createElement('div'); el.className = 'p-3 active:bg-blue-50 cursor-pointer rounded-lg border-b border-slate-100'; el.onclick = () => activateSplitView(index, matchIndex);
+                el.innerHTML = `<div class="flex justify-between items-center mb-1"><span class="text-[9px] font-bold text-blue-600 bg-blue-100 px-1 rounded uppercase">${item.category}</span><span class="text-[9px] text-slate-400 font-mono">#${index + 1}</span></div><div class="text-xs font-medium text-slate-700 line-clamp-2">${item.question}</div>`; els.searchResults.appendChild(el);
+            });
+        }
+
+        window.activateSplitView = (globalIndex, matchIndex) => { state.isSplitView = true; els.mainLayout.classList.add('split-active'); els.comparePanel.classList.remove('hidden'); els.comparePanel.classList.add('flex'); if (typeof matchIndex !== 'undefined') state.searchResultIndex = matchIndex; renderCompareView(globalIndex); els.searchOverlay.style.display = 'none'; };
+        window.closeSplitView = () => { state.isSplitView = false; els.mainLayout.classList.remove('split-active'); els.comparePanel.classList.add('hidden'); els.comparePanel.classList.remove('flex'); state.splitTargetIndex = null; };
+        window.nextSearchResult = () => { if (state.searchResultIndex < state.searchResults.length - 1) renderCompareView(state.searchResults[++state.searchResultIndex].index); };
+        window.prevSearchResult = () => { if (state.searchResultIndex > 0) renderCompareView(state.searchResults[--state.searchResultIndex].index); };
+
+        window.toggleExportMenu = () => els.exportMenu.classList.toggle('hidden');
+        document.addEventListener('click', (e) => { if (!document.getElementById('btn-export-menu').contains(e.target) && !els.exportMenu.contains(e.target)) els.exportMenu.classList.add('hidden'); });
+        window.setExportFormat = (fmt) => { state.exportFormat = fmt; els.btnFmtCsv.className = fmt === 'csv' ? "flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-blue-200 bg-blue-50 text-blue-600" : "flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-slate-200 bg-white text-slate-500"; els.btnFmtTxt.className = fmt === 'txt' ? "flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-blue-200 bg-blue-50 text-blue-600" : "flex-1 py-1.5 text-xs font-bold rounded-lg transition border border-slate-200 bg-white text-slate-500"; };
+
+        window.exportData = (type) => {
+            els.exportMenu.classList.add('hidden'); let data = [], suffix = '';
+            if (type === 'all') { data = state.questions; suffix = 'full'; } else if (type === 'flagged') { data = state.questions.filter(q => q.flagged); suffix = 'flagged'; } else if (type === 'incorrect') { data = state.questions.filter(q => q._tempAnswer && q._tempAnswer.trim() !== q.correct.trim()); suffix = 'incorrect'; } else if (type === 'search') { data = state.searchResults.map(res => res.item); suffix = 'search_results'; }
+            if (data.length === 0) return alert("Brak danych.");
+            if (state.exportFormat === 'csv') downloadCSV(data, suffix); else downloadTXT(data, suffix);
+        };
+
+        function downloadCSV(data, suffix) {
+            const csvData = data.map(q => { const row = q._raw || {}; row['Pytanie'] = q.question; row['Kategoria'] = q.category; row['Wyjaśnienie'] = q.explanation; row['Poprawna'] = q.correct; row['Oflagowane'] = q.flagged ? '1' : ''; q.options.forEach(opt => row[row[opt.key] !== undefined ? opt.key : `Wariant ${opt.key}`] = opt.text); return row; });
+            const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob(["\ufeff" + Papa.unparse(csvData, { delimiter: ';' })], { type: 'text/csv;charset=utf-8;' })); link.download = `${state.currentFileName}_${suffix}.csv`; link.click();
+        }
+
+        function downloadTXT(data, suffix) {
+            let content = ""; const letters = ['a', 'b', 'c', 'd', 'e'];
+            data.forEach(q => { content += q.question.trim() + "\n"; let cL = null, cT = ""; q.options.forEach((opt, idx) => { if (!opt.text) return; content += `${letters[idx]}. ${opt.text.trim()}\n`; if (opt.text.trim() === q.correct.trim()) { cL = letters[idx]; cT = opt.text.trim(); } }); if (cL) content += `\\${cL}. ${cT} =\n`; content += "\n"; });
+            const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8;' })); link.download = `${state.currentFileName}_${suffix}.txt`; link.click();
+        }
+
+        els.btnFirst.onclick = () => { state.currentIndex = 0; renderMainView(); };
+        els.btnLast.onclick = () => { state.currentIndex = getRenderList().length - 1; renderMainView(); };
+        els.btnPrev.onclick = () => { if (state.currentIndex > 0) { state.currentIndex--; renderMainView(); } };
+        els.btnNext.onclick = () => { if (state.currentIndex < getRenderList().length - 1) { state.currentIndex++; renderMainView(); } };
+        els.navInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const list = getRenderList(); if (list.length === 0) return; let val = parseInt(els.navInput.value); if (isNaN(val)) return; state.currentIndex = Math.max(0, Math.min(val - 1, list.length - 1)); renderMainView(); els.navInput.blur(); } });
+        window.addEventListener('resize', () => document.querySelectorAll('.q-card textarea').forEach(autoResize));
+
+        // --- Obsługa gestów Swipe ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchEndX = 0;
+        let touchEndY = 0;
+
+        const swipeZone = document.getElementById('main-panel');
+
+        swipeZone.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        swipeZone.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            touchEndY = e.changedTouches[0].screenY;
+            handleSwipe();
+        }, { passive: true });
+
+        function handleSwipe() {
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = touchEndY - touchStartY;
+            
+            if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                if (Math.abs(deltaX) > 50) {
+                    if (deltaX < 0) {
+                        if (!els.btnNext.disabled) els.btnNext.click();
+                    } else {
+                        if (!els.btnPrev.disabled) els.btnPrev.click();
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
